@@ -1,0 +1,3 @@
+[submodule "pact/kadena_repl_sandbox"]
+	path = pact/kadena_repl_sandbox
+	url = https://github.com/CryptoPascal31/kadena_repl_sandbox.git
