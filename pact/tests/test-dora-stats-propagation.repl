@@ -1,0 +1,275 @@
+(load "../kadena_repl_sandbox/kda-env/init.repl")
+(load "../init/dora.repl")
+
+
+;; Just an utiliy function to cut/compare minting stats
+(begin-tx)
+(module test-util G
+  (defcap G() false)
+
+
+  (defun cut-stats(x cnt)
+    { 'burnt: (take cnt (at 'burnt x)),
+      'minted: (take cnt (at 'minted x))
+    })
+
+  (defun =stat (x y)
+    (= x (take (length x) y)))
+
+  (defun =stats (x:object y:object)
+      (and (=stat (at 'burnt x) (at 'burnt y))
+           (=stat (at 'minted x) (at 'minted y)))
+  )
+)
+(commit-tx)
+
+
+
+
+; Set free guard for minting
+(begin-tx)
+(use free.dora)
+(env-sigs [ {'key:"d-oracle-funders", 'caps:[(SET_SPECIAL_GUARDS)]}
+          ])
+(set-special-guards basic-guards.GUARD_SUCCESS DEFAULT-NOT-ALLOWED-GUARD)
+(commit-tx)
+
+;;;; =======================================================================
+;;;; =============================== CHAIN 2 ===============================
+(env-chain-data { "chain-id": "2"})
+
+(begin-tx)
+(use free.dora)
+(env-sigs [])
+(env-data {'ks:["alice-key"]})
+(install-capability (MINT "alice" 1000.0))
+(mint-create "alice" (read-keyset 'ks) 1000.0)
+(commit-tx)
+
+
+(begin-tx)
+(use free.dora)
+(use free.util-strings)
+(use test-util)
+(env-data {})
+(env-sigs [ {"key":"alice-key",
+             "caps": [(BURN "alice" 200.0)]}
+          ])
+(burn "alice" 200.0)
+
+;;Sanity checks
+(expect "Alice balance must be 800.0" 800.0 (get-balance "alice"))
+
+(expect "Total minted must be 1000.0" 1000.0 (total-minted))
+(expect "Total burnt must be 200.0" 200.0 (total-burnt))
+(expect "Total supply must be 800.0" 800.0 (total-supply))
+
+;(expect "Minted stats ok" {"burnt": [0.0 0.0 200.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0],
+;                           "minted": [0.0 0.0 1000.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0]}
+;                          (get-minting-stats))
+
+(expect-that "Minted stats ok" (=stats {"burnt": [0.0 0.0 200.0 0.0 ], "minted": [0.0 0.0 1000.0 0.0]})
+                               (get-minting-stats))
+
+(commit-tx)
+;;;; =============================== CHAIN 2 END ===========================
+;;;; =======================================================================
+
+; we go to chain 3
+(env-chain-data { "chain-id": "3"})
+
+(begin-tx)
+(use free.dora)
+
+; Check that f
+(expect-failure "force-mint-but-stats is not accessible" "not granted"
+  (force-mint-burn-stats {"burnt": [0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0],
+                          "minted": [0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0]}))
+
+;; Simulate chain3 : reset minting states
+(test-capability (TEST_ONLY))
+(force-mint-burn-stats {"burnt": [0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0],
+                        "minted": [0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0]})
+
+(expect "Total minted must be 0.0" 0.0 (total-minted))
+(expect "Total burnt must be 0.0" 0.0 (total-burnt))
+(expect "Total supply must be 0.0" 0.0 (total-supply))
+(commit-tx)
+
+
+
+;;;; =======================================================================
+;;;; =============================== CHAIN 3 ===============================
+
+; Now mint/burn on chain 3
+(begin-tx)
+(use free.dora)
+(env-sigs [])
+(env-data {'ks:["alice-key"]})
+(install-capability (MINT "alice" 100.0))
+(mint-create "alice" (read-keyset 'ks) 100.0)
+(commit-tx)
+
+
+(begin-tx)
+(use free.dora)
+(use free.util-strings)
+(use test-util)
+(env-data {})
+(env-sigs [ {"key":"alice-key",
+             "caps": [(BURN "alice" 20.0)]}
+          ])
+(burn "alice" 20.0)
+
+(expect-that "Minted stats ok" (=stats {"burnt": [0.0 0.0 0.0 20.0], "minted": [0.0 0.0 0.0 100.0]})
+                               (get-minting-stats))
+
+(expect "Total minted must be 100.0" 100.0 (total-minted))
+(expect "Total burnt must be 20.0" 20.0 (total-burnt))
+(expect "Total supply must be 80.0" 80.0 (total-supply))
+
+(commit-tx)
+
+
+;Transmit from chain3 => chain2
+(begin-tx)
+(use free.dora)
+(env-hash (hash "TestPropag1"))
+; Transfer to chain 2
+(transfer-minting-stats "2")
+(commit-tx)
+;;;; =============================== CHAIN 3 END ===========================
+;;;; =======================================================================
+
+; Simulate chain 2 by restoring
+(env-chain-data { "chain-id": "2"})
+(begin-tx)
+(use free.dora)
+(test-capability (TEST_ONLY))
+(force-mint-burn-stats {"burnt": [0.0 0.0 200.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0],
+                        "minted": [0.0 0.0 1000.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0]})
+(commit-tx)
+
+
+
+
+;;;; =======================================================================
+;;;; =============================== CHAIN 2 ===============================
+
+(begin-tx)
+(use free.dora)
+(env-hash (hash "TestPropag1 Continuation"))
+(continue-pact 1 false (hash "TestPropag1"))
+
+(expect "Total minted must be 0.0" 1100.0 (total-minted))
+(expect "Total burnt must be 0.0" 220.0 (total-burnt))
+(expect "Total supply must be 0.0" 880.0 (total-supply))
+(commit-tx)
+
+; Propagate back to chain 3
+(begin-tx)
+(use free.dora)
+(env-hash (hash "TestPropag2"))
+; Transfer to chain 2
+(transfer-minting-stats "3")
+(commit-tx)
+
+;;;; =============================== CHAIN 2 END ===========================
+;;;; =======================================================================
+
+
+; Simulate chain 3 by restoring
+(env-chain-data { "chain-id": "3"})
+(begin-tx)
+(use free.dora)
+(test-capability (TEST_ONLY))
+(force-mint-burn-stats {"burnt": [0.0 0.0 0.0 20.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0],
+                        "minted": [0.0 0.0 0.0 100.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0]})
+(commit-tx)
+
+
+;;;; =======================================================================
+;;;; =============================== CHAIN 3 ===============================
+
+(begin-tx)
+(use free.dora)
+(use test-util)
+(env-hash (hash "TestPropag2 Continuation"))
+(continue-pact 1 false (hash "TestPropag2"))
+
+(expect "Total minted must be 0.0" 1100.0 (total-minted))
+(expect "Total burnt must be 0.0" 220.0 (total-burnt))
+(expect "Total supply must be 0.0" 880.0 (total-supply))
+
+; Check the propagation
+(expect-that "Minted stats ok" (=stats {"burnt": [0.0 0.0 200.0 20.0],"minted": [0.0 0.0 1000.0 100.0]})
+                               (get-minting-stats))
+
+(commit-tx)
+
+; Propagate to chain 4
+(begin-tx)
+(use free.dora)
+(env-hash (hash "TestPropag3"))
+; Transfer to chain 4
+(transfer-minting-stats "4")
+(commit-tx)
+
+;;;; =============================== CHAIN 3 END ===========================
+;;;; =======================================================================
+
+
+; Simulate chain 4 by restoring
+(env-chain-data { "chain-id": "4"})
+(begin-tx)
+(use free.dora)
+(test-capability (TEST_ONLY))
+(force-mint-burn-stats {"burnt": [0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0],
+                        "minted": [0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0]})
+(commit-tx)
+
+;;;; =======================================================================
+;;;; =============================== CHAIN 4 ===============================
+(begin-tx)
+(use free.dora)
+(env-hash (hash "TestPropag3 Continuation"))
+(continue-pact 1 false (hash "TestPropag3"))
+
+(expect "Total minted must be 0.0" 1100.0 (total-minted))
+(expect "Total burnt must be 0.0" 220.0 (total-burnt))
+(expect "Total supply must be 0.0" 880.0 (total-supply))
+(commit-tx)
+
+; Propagate back to chain 3
+(begin-tx)
+(use free.dora)
+(env-hash (hash "TestPropag4"))
+; Transfer to chain 3
+(transfer-minting-stats "3")
+(commit-tx)
+
+;;;; =============================== CHAIN 4 END ===========================
+;;;; =======================================================================
+
+; Simulate chain 3 by restoring
+(env-chain-data {"chain-id": "3"})
+(begin-tx)
+(use free.dora)
+(test-capability (TEST_ONLY))
+(force-mint-burn-stats {"burnt": [0.0 0.0 200.0 20.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0],
+                        "minted": [0.0 0.0 1000.0 100.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0]})
+(commit-tx)
+
+;;;; =======================================================================
+;;;; =============================== CHAIN 3 ===============================
+(begin-tx)
+(use free.dora)
+(env-hash (hash "TestPropag4 Continuation"))
+(continue-pact 1 false (hash "TestPropag4"))
+
+(expect "Total minted must be 0.0" 1100.0 (total-minted))
+(expect "Total burnt must be 0.0" 220.0 (total-burnt))
+(expect "Total supply must be 0.0" 880.0 (total-supply))
+(commit-tx)
+;;;; =============================== CHAIN 3 END ===========================
+;;;; =======================================================================

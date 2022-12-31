@@ -1,0 +1,325 @@
+(load "../kadena_repl_sandbox/kda-env/init.repl")
+(load "../init/dora.repl")
+
+
+;;; Check minters credendentials
+(begin-tx)
+(use free.dora)
+; Just a sanity check beforce setting special guards
+; All minting/slashing must be not allowed
+(env-data {'ks:["WhatEverKeyYouWant"]})
+(env-sigs [ {'key:"A-Key", 'caps:[(MINT "WhateverAccount" 1000.0)
+                                  (SLASH "WhateverAccount" 1000.0) ]}])
+(expect-failure "Minting/Slashing guards not initialized" "not allowed" (mint-create "WhateverAccount" (read-keyset 'ks) 1000.0))
+(expect-failure "Minting/Slashing guards not initialized" "not allowed" (slash "WhateverAccount" 1000.0 "WhateverAccount 2" 500.0))
+(commit-tx)
+
+; We create a Keyset to be set as a guard
+(begin-tx)
+(use free.dora)
+(env-data {'ks-minter:["minter-key"], 'ks-slasher:["slasher-key"] })
+(env-sigs [])
+
+;; Check that this does not work without governance
+(expect-failure "Set special guard not working without governance" "Keyset failure"
+                (set-special-guards (read-keyset 'ks-minter) (read-keyset 'ks-slasher)))
+
+;; Should work with the governance key
+(env-sigs [ {'key:"d-oracle-funders", 'caps:[(SET_SPECIAL_GUARDS)]}
+          ])
+(set-special-guards (read-keyset 'ks-minter) (read-keyset 'ks-slasher))
+
+(commit-tx)
+
+;; Check creating accounts
+(begin-tx)
+(use free.dora)
+(env-data {'ks:["zorro-key"], 'k-acct-ks:["47c362e2764b62522cfc80740144dafcad4beba0b8a2eb4cff26231212887762"]})
+
+(create-account "zorro" (read-keyset 'ks))
+(expect "Zorro balance should be 0.0" 0.0 (get-balance "zorro"))
+(expect "Zorro locked-balance should be 0.0" 0.0 (get-locked-balance "zorro"))
+
+; Create a bad k:account
+(expect-failure "k: Protocol violation" "protocol violation" (create-account "k:47c362e2764b62522cfc80740144dafcad4beba0b8a2eb4cff26231212887762" (read-keyset 'ks)))
+
+; Create a good k:account
+(create-account "k:47c362e2764b62522cfc80740144dafcad4beba0b8a2eb4cff26231212887762" (read-keyset 'k-acct-ks))
+(expect "k:47 balance should be 0.0" 0.0 (get-balance "k:47c362e2764b62522cfc80740144dafcad4beba0b8a2eb4cff26231212887762"))
+(expect "k:47 locked-balance should be 0.0" 0.0 (get-locked-balance "k:47c362e2764b62522cfc80740144dafcad4beba0b8a2eb4cff26231212887762"))
+
+(commit-tx)
+
+
+
+
+;; Check minting
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-sigs [])
+
+(env-data {'ks:["alice-key"]})
+
+; First we check without the key
+(expect-failure "Must not work without signature/cap" "not installed" (mint-create "alice" (read-keyset 'ks) 1000.0))
+
+; With the key but without cap
+(env-sigs [ {'key:"minter-key", 'caps:[]}
+          ])
+(expect-failure "Must not work without signature/cap" "not installed" (mint-create "alice" (read-keyset 'ks) 1000.0))
+
+; With the cap but with bad key
+(env-sigs [ {'key:"bad-key", 'caps:[(MINT "alice" 1000.0)]}
+          ])
+(expect-failure "Must not work without signature/cap" "Keyset failure" (mint-create "alice" (read-keyset 'ks) 1000.0))
+
+(env-sigs [ {'key:"minter-key", 'caps:[(MINT "alice" 1000.0)]}
+          ])
+(env-enable-repl-natives true)
+(mint-create "alice" (read-keyset 'ks) 1000.0)
+
+
+(expect "Alice balance should be 1000.0" 1000.0 (get-balance "alice"))
+(expect "Alice locked-balance should be 0.0" 0.0 (get-locked-balance "alice"))
+(commit-tx)
+
+
+;;; Try to mint again
+(begin-tx)
+(use free.dora)
+(env-data {'ks:["alice-key"]})
+(env-sigs [ {'key:"minter-key", 'caps:[(MINT "alice" 1000.0)]}
+          ])
+
+(mint-create "alice" (read-keyset 'ks) 1000.0)
+(expect "Alice balance should be 2000.0" 2000.0 (get-balance "alice"))
+(expect "Alice locked-balance should be 0.0" 0.0 (get-locked-balance "alice"))
+(commit-tx)
+
+
+;;; Try to mint again without mint-create
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-sigs [ {'key:"minter-key", 'caps:[(MINT "alice" 1000.0)]}
+          ])
+
+(mint "alice" 1000.0)
+(expect "Alice balance should be 3000.0" 3000.0 (get-balance "alice"))
+(expect "Alice locked-balance should be 0.0" 0.0 (get-locked-balance "alice"))
+(commit-tx)
+
+;; Now we try to burn to come back to 1000.0
+(begin-tx)
+(use free.dora)
+(env-data {})
+
+; Try to burn without capability
+(expect-failure "Burn not work without signature/cap" "not installed" (burn "alice" 2000.0))
+
+; Try to burn with bad signature signature
+(env-sigs [ {'key:"minter-key", 'caps:[(BURN "alice" 2000.0)]}
+          ])
+(expect-failure "Burn not work without signature/cap" "Keyset failure" (burn "alice" 2000.0))
+
+; Noww burn with good cap/signature
+(env-sigs [ {'key:"alice-key", 'caps:[(BURN "alice" 2000.0)]}
+          ])
+(burn "alice" 2000.0)
+(expect "Alice balance should be 1000.0" 1000.0 (get-balance "alice"))
+(expect "Alice locked-balance should be 0.0" 0.0 (get-locked-balance "alice"))
+
+
+; Check minting stats
+(expect "Total minted should be 3000.0" 3000.0 (total-minted))
+(expect "Total burnt should be 2000.0" 2000.0 (total-burnt))
+(expect "Total supply should be 1000.0" 1000.0 (total-supply))
+
+(commit-tx)
+; try Some transfer
+(begin-tx)
+(use free.dora)
+(env-data {'ks:["bob-key"] })
+
+(env-sigs [ {'key:"alice-key", 'caps:[(TRANSFER "alice" "bob" 100.0)]}
+          ])
+(transfer-create "alice" "bob" (read-keyset 'ks) 100.0)
+
+(commit-tx)
+
+(begin-tx)
+(use free.dora)
+(env-data {})
+
+(env-sigs [ {'key:"alice-key", 'caps:[(TRANSFER "alice" "bob" 100.0)]}
+          ])
+(transfer "alice" "bob" 100.0)
+
+(expect "Alice balance should be 800.0 = 1000.0 -100.0 -100.0" 800.0 (get-balance "alice"))
+(expect "Bob balance should be 200.0 = 100.0 + 100.0" 200.0 (get-balance "bob"))
+
+; Sanity check lock -balances
+(expect "Alice locked balance should be 0.0" 0.0 (get-locked-balance "alice"))
+(expect "Bob locked balance should be 0.0" 0.0 (get-locked-balance "bob"))
+
+(commit-tx)
+
+; ================= TEST LOCKS ==========================
+; We lock for 4 days = 345600 sec
+
+; Try with a too small capability in amount
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:5.0, 'dur:345600.0})]}
+          ])
+(expect-failure "Not enough capability" "ot enough" (lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z")))
+
+(expect "Alice balance should be 800.0" 800.0 (get-balance "alice"))
+(expect "Alice locked balance should be 0.0" 0.0 (get-locked-balance "alice"))
+(commit-tx)
+
+; Try with a too small duration
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:245600.0})]}
+          ])
+(expect-failure "Not enough capability" "Cannot lock" (lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z")))
+
+(expect "Alice balance should be 800.0" 800.0 (get-balance "alice"))
+(expect "Alice locked balance should be 0.0" 0.0 (get-locked-balance "alice"))
+(commit-tx)
+
+; With the right capability => Work
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:345600.0})]}
+          ])
+(lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z"))
+
+(expect "Alice balance should be 800.0" 800.0 (get-balance "alice"))
+(expect "Alice locked balance should be 10.0" 10.0 (get-locked-balance "alice"))
+
+; We roolback to do more tests
+(rollback-tx)
+
+
+; Test with 2 locks => Should be equivalent to largest one
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:345600.0})]}
+          ])
+
+(lock-until "alice" 5.0 (time "2022-12-08T00:00:00Z"))
+(lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z"))
+
+(expect "Alice balance should be 800.0" 800.0 (get-balance "alice"))
+(expect "Alice locked balance should be 10.0" 10.0 (get-locked-balance "alice"))
+
+; We roolback to do more tests
+(rollback-tx)
+
+; Test with 2 locks => Should be equivalent to largest one => Reverse the order
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:345600.0})]}
+          ])
+
+(lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z"))
+(lock-until "alice" 5.0 (time "2022-12-08T00:00:00Z"))
+
+(expect "Alice balance should be 800.0" 800.0 (get-balance "alice"))
+(expect "Alice locked balance should be 10.0" 10.0 (get-locked-balance "alice"))
+
+; We roolback to do more tests
+(rollback-tx)
+
+;Check with a too large duration for the capability
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:365600.0})]}
+          ])
+
+(lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z"))
+
+(expect "Alice balance should be 800.0" 800.0 (get-balance "alice"))
+(expect "Alice locked balance should be 10.0" 10.0 (get-locked-balance "alice"))
+
+; Here we commit to continue the test scenario
+(commit-tx)
+
+
+
+(begin-tx)
+(use free.dora)
+(env-chain-data { 'block-time: (time "2022-12-05T00:00:00Z") })
+
+; Try to transfer all: should not work
+(env-sigs [ {'key:"alice-key", 'caps:[(TRANSFER "alice" "bob" 800.0)]}
+          ])
+(expect-failure "Transfer should fail" "Insufficient funds" (transfer "alice" "bob" 800.0))
+(commit-tx)
+
+
+(begin-tx)
+(use free.dora)
+(env-chain-data { 'block-time: (time "2022-12-05T00:00:00Z") })
+(env-sigs [ {'key:"alice-key", 'caps:[(TRANSFER "alice" "bob" 800.0)]}
+          ])
+; Try to transfer only 790.0
+(transfer "alice" "bob" 790.0)
+(expect "Alice balance should be 10.0" 10.0 (get-balance "alice"))
+(expect "Alice locked balance should be 10.0" 10.0 (get-locked-balance "alice"))
+
+(expect "Bob balance should be 200.0 + 790.0 = 990.0" 990.0 (get-balance "bob"))
+(expect "Bob locked balance should be 0.0" 0.0 (get-locked-balance "bob"))
+(commit-tx)
+
+
+(begin-tx)
+(use free.dora)
+(env-chain-data { 'block-time: (time "2022-12-05T00:00:00Z") })
+; Try to transfer the last 10 again
+(env-sigs [ {'key:"alice-key", 'caps:[(TRANSFER "alice" "bob" 10.0)]}
+          ])
+
+(expect-failure "Transfer should fail" "Insufficient funds"   (transfer "alice" "bob" 10.0))
+(commit-tx)
+
+
+
+;; Finish the lock => Transfer should work now
+(begin-tx)
+(use free.dora)
+(env-chain-data { 'block-time: (time "2022-12-09T00:00:00Z") })
+; The lock is finished; verify that the locked balance is now 0.0
+(expect "Alice balance should be 10.0" 10.0 (get-balance "alice"))
+(expect "Alice locked balance should be 0.0" 0.0 (get-locked-balance "alice"))
+
+(env-sigs [ {'key:"alice-key", 'caps:[(TRANSFER "alice" "bob" 10.0)]}
+          ])
+
+(transfer "alice" "bob" 10.0)
+
+(expect "Alice balance should be 0.0" 0.0 (get-balance "alice"))
+(expect "Alice locked balance should be 0.0" 0.0 (get-locked-balance "alice"))
+
+(expect "Bob balance should be 200.0 + 790.0 + 10.0 = 1000.0" 1000.0 (get-balance "bob"))
+(expect "Bob locked balance should be 0.0" 0.0 (get-locked-balance "bob"))
+(commit-tx)
+
+
+
+; Slashing tests
