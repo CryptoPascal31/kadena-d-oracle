@@ -1,0 +1,24 @@
+; Deploy contract
+(begin-tx)
+(env-chain-data { "chain-id": "18"})
+(env-enable-repl-natives true)
+(load "../contracts/dora.pact")
+(create-table accounts-table)
+(create-table special-guards-table)
+(create-table minting-stats-table)
+(commit-tx)
+
+;; Define keyset
+(begin-tx)
+(env-data {'ks:["d-oracle-funders"]})
+(namespace 'free)
+(define-keyset "free.d-oracle-funders" (read-keyset 'ks))
+(env-data {})
+(commit-tx)
+
+;; Init contract
+(begin-tx)
+(use free.dora)
+(env-sigs [ {'key:"d-oracle-funders", 'caps: [(INIT)]} ])
+(init)
+(commit-tx)
