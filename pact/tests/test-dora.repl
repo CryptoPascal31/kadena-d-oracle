@@ -173,7 +173,7 @@
 (use free.dora)
 (env-data {})
 (env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
-(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:5.0, 'dur:345600.0})]}
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:5.0, 'expire:"2022-12-08T00:00:00Z"})]}
           ])
 (expect-failure "Not enough capability" "ot enough" (lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z")))
 
@@ -186,7 +186,7 @@
 (use free.dora)
 (env-data {})
 (env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
-(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:245600.0})]}
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'expire:"2022-12-05T00:00:00Z"})]}
           ])
 (expect-failure "Not enough capability" "Cannot lock" (lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z")))
 
@@ -199,7 +199,7 @@
 (use free.dora)
 (env-data {})
 (env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
-(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:345600.0})]}
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'expire:"2022-12-08T00:00:00Z"})]}
           ])
 (lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z"))
 
@@ -215,7 +215,7 @@
 (use free.dora)
 (env-data {})
 (env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
-(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:345600.0})]}
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'expire:"2022-12-08T00:00:00Z"})]}
           ])
 
 (lock-until "alice" 5.0 (time "2022-12-08T00:00:00Z"))
@@ -232,7 +232,7 @@
 (use free.dora)
 (env-data {})
 (env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
-(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:345600.0})]}
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'expire:"2022-12-08T00:00:00Z"})]}
           ])
 
 (lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z"))
@@ -249,7 +249,7 @@
 (use free.dora)
 (env-data {})
 (env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
-(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'dur:365600.0})]}
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'expire:"2023-12-08T00:00:00Z"})]}
           ])
 
 (lock-until "alice" 10.0 (time "2022-12-08T00:00:00Z"))

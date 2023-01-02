@@ -65,7 +65,7 @@
   (use util-math [sum min max])
   (use util-lists [replace-at extend-like])
   (use util-strings [to-string])
-  (use util-time [genesis now latest is-past is-future])
+  (use util-time [genesis now latest is-past is-future to-time])
 
   ;; Basic administrative capabilities to upgrade and init the contract database
 
@@ -107,7 +107,7 @@
 
   (defschema lock-info
     amount:decimal
-    dur:decimal
+    expire
   )
 
   ; --------------------------------------------------------------------------
@@ -133,10 +133,10 @@
   )
 
   (defun LOCK-manager:object{lock-info} (managed:object{lock-info} requested:object{lock-info})
-    (bind managed {'amount:=m-amount, 'dur:=m-dur}
-      (bind requested {'amount:=r-amount, 'dur:=r-dur}
+    (bind managed {'amount:=m-amount, 'expire:=m-expire}
+      (bind requested {'amount:=r-amount, 'expire:=r-expire}
           (enforce (<= r-amount m-amount) "Not enough capability to lock")
-          (enforce (<= r-dur m-dur) (format "Cannot lock to {}s" [r-dur]))
+          (enforce (<= r-expire (to-time m-expire)) (format "Cannot lock to {}s" [r-expire]))
           managed))
   )
 
@@ -310,30 +310,26 @@
   (defun lock-until (account:string amount:decimal lock-time:time)
     @doc "Lock an amount until a time"
     (enforce (is-future lock-time) "Lock time must be in the future")
-    (lock-for-duration account amount (diff-time lock-time (now)))
-
-  )
-
-  (defun lock-for-duration (account:string amount:decimal duration:decimal)
     (update-locked-balance account)
-    (enforce (> duration 0.0) "Lock time must be in the future")
-    (with-capability (LOCK account {'amount:amount, 'dur:duration})
+    (with-capability (LOCK account {'amount:amount, 'expire:lock-time})
       (with-read accounts-table account
                {'available-balance:= available,
                 'locked-balance:= locked,
                 'locked-time:= current-lock-time}
-      (let* ((add-lock (max (- amount locked) 0.0))
-             (new-lock-time (add-time (now) duration))
-             (lock-time-updated (latest current-lock-time new-lock-time)))
-        (enforce (<= add-lock available) "Insufficient available")
-
-        (update accounts-table account
-              {'locked-balance: (+ locked add-lock),
-               'available-balance: (- available add-lock),
-               'locked-time: lock-time-updated
-              }))))
+        (let* ((incremental-lock (max (- amount locked) 0.0))
+               (lock-time-updated (latest current-lock-time lock-time)))
+          (enforce (<= incremental-lock available) "Insufficient available")
+          (update accounts-table account
+                {'locked-balance: (+ locked incremental-lock),
+                 'available-balance: (- available incremental-lock),
+                 'locked-time: lock-time-updated
+                }))))
   )
 
+  (defun lock-for-duration (account:string amount:decimal duration:decimal)
+    (enforce (> duration 0.0) "Lock time must be in the future")
+    (lock-until account amount (add-time (now) duration))
+  )
 
   ; --------------------------------------------------------------------------
   ; Transfer functions
