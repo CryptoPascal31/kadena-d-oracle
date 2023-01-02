@@ -209,6 +209,23 @@
 ; We roolback to do more tests
 (rollback-tx)
 
+; With the right capability => Work
+; But here try to do the same thing with lock-for-duration
+(begin-tx)
+(use free.dora)
+(env-data {})
+(env-chain-data { 'block-time: (time "2022-12-04T00:00:00Z") })
+(env-sigs [ {'key:"alice-key", 'caps:[(LOCK "alice" {'amount:10.0, 'expire:"2022-12-08T00:00:00Z"})]}
+          ])
+(lock-for-duration "alice" 10.0 345600.0)
+
+(expect "Alice balance should be 800.0" 800.0 (get-balance "alice"))
+(expect "Alice locked balance should be 10.0" 10.0 (get-locked-balance "alice"))
+
+; We roolback to do more tests
+(rollback-tx)
+
+
 
 ; Test with 2 locks => Should be equivalent to largest one
 (begin-tx)
