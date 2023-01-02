@@ -1,0 +1,16 @@
+(begin-tx)
+(namespace 'free)
+(env-data {'ks:["dictator"]})
+(define-keyset "free.dora-initial-governor" (read-keyset 'ks))
+(commit-tx)
+
+(env-data {})
+
+(begin-tx)
+(load "../contracts/dao-dora.pact")
+(create-table governors-tab)
+(create-table proposal-id-tab)
+(create-table proposal-tab)
+(create-table voter-tab)
+(init)
+(commit-tx)

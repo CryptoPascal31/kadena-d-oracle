@@ -1,0 +1,300 @@
+(load "../kadena_repl_sandbox/kda-env/init.repl")
+(load "../init/dora.repl")
+(load "../init/dao-dora.repl")
+
+
+(begin-tx)
+(module test-util G
+  (defcap G() false)
+
+  (defun =length (exp-length x)
+    (= (length x) exp-length))
+)
+(commit-tx)
+
+
+; Initialize DORA guards, alow minting to evrybody for Test
+(begin-tx)
+(env-data {})
+(env-keys [])
+;; Should work with the governance key
+(env-sigs [ {'key:"d-oracle-funders", 'caps:[(free.dora.SET_SPECIAL_GUARDS)]}
+          ])
+(free.dora.set-special-guards basic-guards.GUARD_SUCCESS basic-guards.GUARD_FAILURE)
+(commit-tx)
+
+
+(begin-tx)
+
+(env-keys [])
+(env-sigs [])
+
+(env-data {'ks_a:["alice_key"], 'ks_b:["bob_key"], 'ks_c:["carol_key"], 'ks_d:["dave_key"] })
+(install-capability (free.dora.MINT "alice" 1000.0))
+(install-capability (free.dora.MINT "bob" 1000.0))
+(install-capability (free.dora.MINT "carol" 1000.0))
+(install-capability (free.dora.MINT "dave" 1000.0))
+(free.dora.mint-create "alice" (read-keyset 'ks_a) 1000.0)
+(free.dora.mint-create "bob" (read-keyset 'ks_b) 1000.0)
+(free.dora.mint-create "carol" (read-keyset 'ks_c) 1000.0)
+(free.dora.mint-create "dave" (read-keyset 'ks_d) 1000.0)
+(commit-tx)
+
+; Test a local transaction => Always approved
+(begin-tx)
+(use free.dao-dora)
+(env-data {})
+(env-keys [])
+(env-sigs [])
+(env-chain-data {'sender:""})
+(env-hash (hash "Test Trx 1"))
+(expect-that "Transaction succes in local" (contains "approved") (enforce-approve-transaction))
+(commit-tx)
+
+
+; Test a never proposed transaction => Fail
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser"})
+(env-hash (hash "Test Trx 2"))
+(expect-failure "Unknown transaction" "never proposed" (enforce-approve-transaction))
+(commit-tx)
+
+
+; Add few proposers with the initial-governor key
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser", 'block-time: (time "2022-12-01T00:01:00Z") })
+(env-keys ["dictator"])
+(env-data {'ks-a:["governor_grace"], 'ks-b:["governor-heidi"], 'ks-c:["governor-judy"] })
+(add-governor "Governor_Grace" (read-keyset 'ks-a))
+(add-governor "Governor_Heidi" (read-keyset 'ks-b))
+(add-governor "Governor_Judy" (read-keyset 'ks-b))
+
+(expect "3 Governors" 3 (length (list-governors)))
+
+; Revoke Judy right now
+(revoke-governor "Governor_Judy")
+(expect "2 Governors" 2 (length (list-governors)))
+(commit-tx)
+
+
+; Check that any governor can't be added or revoked without initial governor key
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser", 'block-time: (time "2022-12-01T00:01:00Z") })
+(env-keys [])
+(env-data {'ks-d:["governor_dave"]})
+(expect-failure "Transaction is non approved" "never proposed"  (add-governor "Governor_Dave" (read-keyset 'ks-d)))
+(expect-failure "Transaction is non approved" "never proposed"  (revoke-governor "Governor_Grace"))
+(commit-tx)
+
+
+; Check that ant governor can't be added or revoked with initial governor key but after "loose power" date
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser", 'block-time: (time "2023-12-01T00:01:00Z") })
+(env-keys ["dictator"])
+(env-data {'ks-d:["governor_dave"]})
+(expect-failure "Transaction is non approved" "never proposed"  (add-governor "Governor_Dave" (read-keyset 'ks-d)))
+(expect-failure "Transaction is non approved" "never proposed"  (revoke-governor "Governor_Grace"))
+(commit-tx)
+
+; Create a proposal without being a governor
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser", 'block-time: (time "2023-12-01T00:01:00Z") })
+(env-keys [])
+(expect-failure "Only a governor must do a proposal" (propose "Proposal description 1" (hash "Proposal Data 1") "Proposal Data 1"))
+(commit-tx)
+
+
+; Create a proposal with a bds hash
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-keys ["governor_grace"])
+(expect-failure "Proposal with a bad hash" "hash" (propose "Proposal description 1" (hash "Proposal Data 1") "Proposal Data 1 with Error"))
+(commit-tx)
+
+
+; Create a good proposal
+(begin-tx)
+(use free.dao-dora)
+(use test-util)
+(env-keys ["governor_grace"])
+(propose "Proposal description 1" (hash "Proposal Data Good") "Proposal Data Good")
+
+(expect-that "In-vote = 1" (=length 1) (list-proposals-in-vote))
+(expect-that "In-vote = 0" (=length 0) (list-proposals-voted))
+(expect-that "In-vote = 0" (=length 0) (list-proposals-archive))
+(commit-tx)
+
+
+; Create a good proposal
+(begin-tx)
+(use free.dao-dora)
+(use test-util)
+(env-keys ["governor_grace"])
+;(propose "Proposal description 1" (hash "Proposal Data 1") "Proposal Data 1")
+
+(expect-that "In-vote = 1" (=length 1) (list-proposals-in-vote))
+(expect-that "In-vote = 0" (=length 0) (list-proposals-voted))
+(expect-that "In-vote = 0" (=length 0) (list-proposals-archive))
+(commit-tx)
+
+
+;; Now LETS VOTE
+(begin-tx)
+(use free.dao-dora)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2022-12-02T00:01:00Z") ; One day after
+                 })
+
+(env-sigs [ {'key:"alice_key", 'caps:[(free.dora.LOCK "alice" {'amount:10.0, 'expire:"2023-12-16T00:01:00Z"})]}
+          ])
+
+(vote 1 "alice" 10.0 "YES")
+
+; Try a second vote => Musr fail
+(expect-failure "Only one vote is allowed" "already voted" (vote 1 "alice" 5.0 "YES"))
+
+(commit-tx)
+
+; Bob vote
+(begin-tx)
+(use free.dao-dora)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2022-12-02T00:01:00Z") ; One day after
+                 })
+
+
+; Make the vote fail by not giving enough locking approval
+(env-sigs [ {'key:"bob_key", 'caps:[(free.dora.LOCK "bob" {'amount:10.0, 'expire:"2023-12-16T00:01:00Z"})]}
+          ])
+(expect-failure "Lock allowance amount is not enough" "Not enough" (vote 1 "bob" 20.0 "NO"))
+(rollback-tx)
+
+
+(begin-tx)
+(use free.dao-dora)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2022-12-02T00:01:00Z") ; One day after
+                 })
+
+
+; Make the vote fail by not giving enough locking approval
+(env-sigs [ {'key:"bob_key", 'caps:[(free.dora.LOCK "bob" {'amount:20.0, 'expire:"2023-12-14T00:01:00Z"})]}
+          ])
+
+(expect-failure "Lock allowance amount is not enough" "Cannot lock" (vote 1 "bob" 20.0 "NO"))
+(rollback-tx)
+
+
+;; Bob vote will be successful
+(begin-tx)
+(use free.dao-dora)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2022-12-02T00:01:00Z") ; One day after
+                 })
+
+(env-sigs [ {'key:"bob_key", 'caps:[(free.dora.LOCK "bob" {'amount:20.0, 'expire:"2023-12-16T00:01:00Z"})]}
+          ])
+
+(vote 1 "bob" 20.0 "NO")
+(commit-tx)
+
+
+;; Carol vote will be successful
+(begin-tx)
+(use free.dao-dora)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2022-12-02T00:01:00Z") ; One day after
+                 })
+
+(env-sigs [ {'key:"carol_key", 'caps:[(free.dora.LOCK "carol" {'amount:30.0, 'expire:"2023-12-16T00:01:00Z"})]}
+          ])
+
+(vote 1 "carol" 30.0 "yes")
+(commit-tx)
+
+;; Dave vote will be successful
+(begin-tx)
+(use free.dao-dora)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2022-12-02T00:01:00Z") ; One day after
+                 })
+
+(env-sigs [ {'key:"dave_key", 'caps:[(free.dora.LOCK "dave" {'amount:5.0, 'expire:"2023-12-16T00:01:00Z"})]}
+          ])
+
+(vote 1 "dave" 5.0 "Neutral")
+(commit-tx)
+
+
+; Now check temporary results
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2022-12-02T00:01:00Z") ; One day after
+                })
+(print (to-string (voting-details 1)))
+(expect "4 Voters" 4 (at 'count (voting-details 1)))
+(expect "Yes = 40.0 (alice + carol)" 40.0 (at 'yes (voting-details 1)))
+(expect "No = 20.0 (bob)" 20.0 (at 'no (voting-details 1)))
+(expect "Neutral = 5.0 (dave)" 5.0 (at 'neutral (voting-details 1)))
+(commit-tx)
+
+; Try to get the final result before end-time
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2022-12-02T00:01:00Z") ; One day after
+                })
+(env-hash (hash "Proposal Data Good"))
+
+(expect-failure "Before end-time => Error" "Approval too early" (get-voting-result))
+(commit-tx)
+
+
+; Try to get the final result after action time
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2023-12-25T00:01:00Z") ; One day after
+                })
+(env-hash (hash "Proposal Data Good"))
+
+(expect-failure "Before end-time => Error" "Approval too late" (get-voting-result))
+(commit-tx)
+
+
+
+; Try to get the final result in the right timeframe
+(begin-tx)
+(use free.dao-dora)
+(use free.util-strings)
+(env-chain-data {'sender: "OneUser",
+                 'block-time: (time "2023-12-21T00:01:00Z") ; One day after
+                })
+(env-hash (hash "Proposal Data Good"))
+
+(let ((res (get-voting-result)))
+  (expect "Yes = 40.0 (alice + carol)" (/ 40.0 65.0) (at 'yes res))
+  (expect "No = 20.0 (alice + carol)" (/ 20.0 65.0) (at 'no res))
+  (expect "Neutral = 5.0 (alice + carol)" (/ 5.0 65.0) (at 'neutral res))
+)
+
+(expect "Now the transaction is validated" true (at 'validated (voting-details 1)))
+
+(expect-failure "Can't get result two times" "already been validated" (get-voting-result))
+
+(commit-tx)
