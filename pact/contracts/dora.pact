@@ -65,7 +65,7 @@
   (use util-math [sum min max])
   (use util-lists [replace-at extend-like])
   (use util-strings [to-string])
-  (use util-time [genesis now latest])
+  (use util-time [genesis now latest is-past is-future])
 
   ;; Basic administrative capabilities to upgrade and init the contract database
 
@@ -291,7 +291,7 @@
                {'available-balance:= available,
                 'locked-balance:= locked,
                 'locked-time:= _time}
-      (if (and (> locked 0.0) (<= _time (now)))
+      (if (and (> locked 0.0) (is-past _time))
           (update accounts-table account
                   {'available-balance: (+ available locked),
                    'locked-balance: 0.0,
@@ -303,13 +303,13 @@
     (with-read accounts-table account
              {'locked-balance:= locked,
               'locked-time:= locked-time}
-      (if (< locked-time (now)) 0.0 locked))
+      (if (is-past locked-time) 0.0 locked))
   )
 
 
   (defun lock-until (account:string amount:decimal lock-time:time)
     @doc "Lock an amount until a time"
-    (enforce (> lock-time (now)) "Lock time must be in the future")
+    (enforce (is-future lock-time) "Lock time must be in the future")
     (lock-for-duration account amount (diff-time lock-time (now)))
 
   )
